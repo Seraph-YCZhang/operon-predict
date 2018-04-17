@@ -15,6 +15,18 @@ from profile import fna_file, fna_new, work_path
 np.set_printoptions(suppress=True)
 np.seterr(divide='ignore', invalid='ignore')
 
+def check_work_path():
+    global work_path
+    if os.path.exists(work_path):
+        print('workpath sets rightly\n')
+    else:
+        print('wrong workpath')
+        sys.exit(0)
+    if work_path.endswith('/'):
+        work_path = work_path[:-1]
+
+
+
 def srr_download(download_choose):
     while download_choose is 'y':
         file_name = input('filename: ')
@@ -82,6 +94,7 @@ def extract_position(content, length): # from .gff
     midposition = []
     genelist = []
     direction = []
+    directionlist = []
     count_ = 0
     for i in range(length):
         line = content[i].split()
@@ -94,14 +107,18 @@ def extract_position(content, length): # from .gff
                 direction.append(line[8])
                 midposition.append(int((startposition[count_] + endposition[count_]))/2)
                 count_ = count_+1
+            elif tmp_key.group(0) in genename:
+                no_ = genename.index(tmp_key.group(0))
+                midposition[no_] = (int(startposition[no_])+int(line[5]))/2
     print(count_)
-    tmplist = zip(genename,midposition)
+    tmplist = zip(genename, midposition, direction)
     tmp = list(tmplist)
     sorted(tmp, key=lambda a:a[1])
     zip(tmp)
     for i in tmp:
         genelist.append(i[0])
-    return genelist, startposition, endposition, direction
+        directionlist.append(i[2])
+    return genelist, startposition, endposition, directionlist
 
 
 def load_from_fasta_cds():
@@ -117,16 +134,41 @@ def load_from_fasta_cds():
     return locus_tag, gene_name
 
 
+def samtools_command(work_path):
+    load_k.check_samtools()
+    load_k.samtool_command(work_path)
+
+
 def kallisto_command():
     if load_k.check_kallisto() is True:
         fastq_list = load_k.generate_fastq_list(work_path)
-        load_k.generate_fna_according_to_gene_pos(fna_file, fna_new, positiondict)
+        load_k.generate_new_fna(fna_file, fna_new, positiondict)
         for file in os.listdir(work_path):
             if re.search(fna_new, file):
                 kallisto_index = load_k.kallisto_command_index(fna_new)
         output_path = load_k.kallisto_command_quant(fastq_list, kallisto_index)
         mat = load_k.extract_tpm_from_kallisto(work_path)
     return mat
+
+
+def sort_gene(positiondict):
+    mid_pos = []
+    dict = []
+    for key in positiondict:
+        dict.append(key)
+        num = 0
+        for (x, y) in positiondict[key]:
+            x_ = int(x)
+            y_ = int(y)
+            if num == 0:
+                start = x_
+                end = y_
+            else:
+                end = y_
+            num += 1
+        mid_pos.append((start + end)/2)
+    dict = [dict for (mid_pos, dict) in sorted(zip(mid_pos, dict))]
+    return dict
 
 
 def dict_of_gene(genename, startposition, endposition):
@@ -138,7 +180,6 @@ def dict_of_gene(genename, startposition, endposition):
         else:
             dict[name_] = [(int(startposition[i]),int(endposition[i]))]
         i = i + 1
-
     return dict
 
 
@@ -160,13 +201,16 @@ def exp_of_gene_tpm(dict, base_count):
 
 
 def mat_choose(choose, matrix):
-    if choose == 1:
+    if choose is '1':
         result_mat = matrix_cij(matrix) * 2
-    elif choose == 2:
+    elif choose is '2':
         result_mat = matrix_pearson(matrix)
-    elif choose == 3:
+    elif choose is '3':
         result_mat = matrix_spearman(matrix)
-    return  result_mat
+    else:
+        print('\n!WRONG INPUT CHARACTER!')
+        sys.exit(0)
+    return result_mat
 
 
 def pearson(vector1, vector2):
@@ -181,7 +225,6 @@ def pearson(vector1, vector2):
     sum2_pow = (vector2**2).sum()
     #sum up the products
     p_sum = (vector1*vector2).sum()
-    #分子num，分母den
     num = p_sum - (sum1*sum2/n)
     den = math.sqrt((sum1_pow-pow(sum1, 2)/n)*(sum2_pow-pow(sum2, 2)/n))
     if den == 0:
@@ -235,18 +278,18 @@ def matrix_cij(matrix):
     diff_exp[diff_exp < 0] = -1
     i_j_coexp_mat=np.empty((row_,row_))
     for i in range(row_):
-        exp_i = diff_exp[i:i+1,:]
+        exp_i = diff_exp[i:i+1, :]
         product_of_i = diff_exp * exp_i
         mat_tmp=product_of_i.sum(axis=1)
         i_j_coexp_mat[i:i+1,:] = mat_tmp
     i_j_coexp_mat = i_j_coexp_mat/(2*column_**2)
     return i_j_coexp_mat
-    '''
-    diff_exp
-        c2-c1 c3-c1
-    g1
-    g2 
-    '''
+
+    # diff_exp
+    #     c2-c1 c3-c1
+    # g1
+    # g2
+
 
 
 def partition_with_direction(direction):
@@ -255,6 +298,7 @@ def partition_with_direction(direction):
     array_1=[]
     start=0
     i=0
+    f=open('part.txt','w')
     while i < len(direction):
         array_dirct.append(direction[i])
         i += 1
@@ -264,25 +308,31 @@ def partition_with_direction(direction):
                 if len(array_1) > 1 :
                     end = i - 3
                     groups.append((start,end))
+                    f.write(str(direction[start:end+1]))
                     array_dirct = []
                     array_1 = []
                     start = i - 2
                     i = start
             elif array_dirct[-1] == array_dirct[0] and array_dirct[-1]!=array_dirct[-2]:
                 array_1 = []
+        if i == len(direction)-1:
+            groups.append((start, i-1))
+            f.write(str(direction[start:i + 1]))
+    f.close()
     return groups
 
 
 def find_max(dist_mat, threashold):
-    tmp = threashold
-    x_= -999
-    for i in range(len(dist_mat)):
-        if dist_mat[i] > tmp:
-            tmp = dist_mat[i]
-            x_ = i
-    if x_ != -999:
-        return x_, tmp
-    else:
+    # tmp = threashold
+    x_ = 999
+    max_ = max(dist_mat)
+    if max_ >= threashold:
+        for i in range(len(dist_mat)):
+            if dist_mat[i] >= max_:
+                tmp = dist_mat[i]
+                x_ = i
+                return x_, tmp
+    if x_ == 999:
         return False
 
 
@@ -301,12 +351,14 @@ def find_nearest(x, y, matrix):
 def check_item(x, items):
     i = 0
     for item in items:
+        # print(x)
+        # print(item)
+        # print(items)
         if x in item:
             i += 1
+            return True
     if i == 0:
         return False
-    if i > 0:
-        return True
 
 
 def cluster(matrix, groups, genename, threashold):
@@ -316,61 +368,126 @@ def cluster(matrix, groups, genename, threashold):
         len_ = y - x
         gene_list = genename[x:y+1]
         cluster = []
-
-        #print(dist)
+        # print(dist)
         dist_mat, dist = find_nearest(x, y, matrix)
         print('dist: '+str(dist))
         print('dist_mat: '+str(dist_mat))
         len_2 = 0
         while len_2 < len_:
+            # print(find_max(dist_mat,threashold))
             if find_max(dist_mat,threashold) is not False:
                 a1, b1 = find_max(dist_mat,threashold)
                 nearest_gene = dist[a1][1]
                 gene_self = dist[a1][0]
                 dist_mat.remove(dist_mat[a1])
                 dist.remove(dist[a1])
-                (gene_1,gene_2) = (gene_list[gene_self], gene_list[nearest_gene])
-                item_ = (gene_1,gene_2)
+                [gene_1,gene_2] = [gene_list[gene_self], gene_list[nearest_gene]]
+                item_ = [gene_1,gene_2]
                 if len_2 == 0:
                     cluster.append(item_)
                     check_list.append(item_)
                 else:
-                    for item in cluster:
-                        check_gene_1 = check_item(gene_1, check_list)
-                        check_gene_2 = check_item(gene_2, check_list)
-                        if check_gene_1 is False and check_gene_2 is False:
-                            cluster.append(item_)
-                            check_list.append(item_)
-                        elif check_gene_1 is True and check_gene_2 is False:
-                            item__ = (item, gene_2)
-                            cluster.remove(item)
-                            cluster.append(item__)
-                            check_list.append(item__)
-                        elif check_gene_2 is True and check_gene_1 is False:
-                            item__ = (item, gene_1)
-                            cluster.remove(item)
-                            cluster.append(item__)
-                            check_list.append(item__)
+                    check_gene_1 = check_item(gene_1, check_list)
+                    check_gene_2 = check_item(gene_2, check_list)
+                    # print('listcheck：' + str(check_list))
+                    # print(check_gene_1)
+                    # print(check_gene_2)
+                    if check_gene_2 is True and check_gene_1 is True:
+                        # print('clustercheck222：' + str(cluster))
+                        for item in cluster:
+                            # print('itemcheck222：' + str(item))
+                            check_gene_1_initem = check_item(gene_1, item)
+                            check_gene_2_initem = check_item(gene_2, item)
+                            if check_gene_1_initem is True:
+
+                                item_1 = item
+                            if check_gene_2_initem is True:
+                                item_2 = item
+                        item__ = []
+                        item__.extend(item_1)
+                        item__.extend(item_2)
+                        # print(cluster)
+                        # print(item_1)
+                        # print(item_2)
+                        # print(item__)
+                        cluster.remove(item_1)
+                        cluster.remove(item_2)
+                        # print('clustercheck：'+str(cluster))
+                        cluster.append(item__)
+                        check_list.append(item__)
+                    elif check_gene_1 is False and check_gene_2 is False:
+                        # print('1111:'+str(gene_1))
+                        # print('2222:'+str(gene_2))
+                        # print(cluster)
+                        cluster.append(item_)
+                        check_list.append(item_)
+                    else:
+                        for item in cluster:
+                            # print('itemcheck2222111：' + str(item))
+                            # print('clustercheck222：' + str(cluster))
+                            # print('listcheck222：' + str(check_list))
+                            check_gene_1_initem = check_item(gene_1, item)
+                            check_gene_2_initem = check_item(gene_2, item)
+                            if check_gene_1 is True and check_gene_2 is False and check_gene_1_initem is True:
+                                # print('clustercheck221：' + str(cluster))
+                                # print('listcheck221：' + str(check_list))
+                                # print(check_gene_1_initem)
+                                    # print(gene_2)
+                                tmp = item
+                                    # print('tmp:'+str(tmp))
+                                tmp.append(gene_2)
+                                item__ = tmp
+                                # print('tmp:' + str(tmp))
+                                #     # print('itemcheck：' + str(cluster))
+                                # print('__:'+str(item__))
+                                # print('item:'+str(item))
+                                cluster.remove(item)
+                                cluster.append(item__)
+                                check_list.append(item__)
+                                break
+                                    # print('clustercheck221111：' + str(cluster))
+                                    # print('listcheck221111：' + str(check_list))
+                                    # check_list.append(check_gene_2)
+                            if check_gene_2 is True and check_gene_1 is False and check_gene_2_initem is True:
+                                # print('clustercheck2222：' + str(cluster))
+                                # print('listcheck2222：' + str(check_list))
+                                tmp = item
+                                tmp.append(gene_1)
+                                item__ = tmp
+                                    # print('clustercheck：' + str(cluster))
+                                    # print(item__)
+                                    # print(item)
+                                cluster.remove(item)
+                                cluster.append(item__)
+                                check_list.append(item__)
+                                break
+                                    # print('clustercheck：' + str(cluster))
+                                    # print('listcheck：' + str(check_list))
+                                    # check_list.append(check_gene_1)
             elif find_max(dist_mat, threashold) is False:
-                # pass
+                # break
                 len__=len(dist_mat)
                 i = len__
                 for i in range(len__):
                     nearest_gene = dist[i][1]
                     gene_self = dist[i][0]
                     i -= 1
-                    (gene_1, gene_2) = (gene_list[gene_self], gene_list[nearest_gene])
+                    gene_1, gene_2 = gene_list[gene_self], gene_list[nearest_gene]
                     check_gene_1 = check_item(gene_1, check_list)
                     check_gene_2 = check_item(gene_2, check_list)
+                    # print(check_gene_1)
+                    # print(check_gene_2)
+                    # print(check_list)
+                    # print(cluster)
                     if check_gene_1 is False and check_gene_2 is False:
                         cluster.append(gene_1)
                         cluster.append(gene_2)
                         check_list.append(gene_1)
                         check_list.append(gene_2)
-                    elif check_gene_1 is True and check_gene_2 is False:
+                    if check_gene_1 is True and check_gene_2 is False:
                         cluster.append(gene_2)
                         check_list.append(gene_2)
-                    elif check_gene_2 is True and check_gene_1 is False:
+                    if check_gene_2 is True and check_gene_1 is False:
                         cluster.append(gene_1)
                         check_list.append(gene_1)
             len_2 += 1
@@ -396,7 +513,6 @@ def possible_cluster(partition, genename):
     f= open('ps.txt','w+')
     for line in list_:
         f.write(line+'\n')
-
     f.close()
     return list_
 
@@ -441,7 +557,7 @@ def  roc_function(rate_list):
     # print(x_)
     y_ = list_[:, 1]
     # print(y_)
-    plt.plot(x_, y_, color='c')
+    plt.plot(x_, y_, color='r')
     # plt.savefig(threshold+'.jpg')
     plt.title('ROC Curve (AUC = %0.4f)' % roc_auc)
     plt.savefig('roc_fig.png')
@@ -466,7 +582,7 @@ def  pr_function(rate_list):
     # print(x_)
     y_ = list_[:, 1]
     # print(y_)
-    plt.plot(x_, y_, color='c')
+    plt.plot(x_, y_, color='m')
     # plt.savefig(threshold+'.jpg')
     plt.title('PR (AUC = %0.4f)' % pr_auc)
     plt.savefig('pr_fig.png')
@@ -474,6 +590,7 @@ def  pr_function(rate_list):
 
 
 if __name__ == "__main__":
+    check_work_path()
     time_start = time.time()
     print('---operon predictor is running...')
     download_srr_choose = input('do you need to download SRR seq from ncbi[y/n]')
@@ -483,18 +600,27 @@ if __name__ == "__main__":
     if download_gff_choose is 'y':
         gff_download(download_gff_choose)
     func_choose = input('function choose: 1 for hist_plot; 2 for operon predicion')
+    if func_choose is not '1' and func_choose is not '2':
+        print('WRONG INPUT!')
+        sys.exit(1)
     print('---calculating...')
     #contentofsam, lofsam, direction, contentofgff, lofgff, base_count, genename, sposition, eposition, explvofgene, condition = [], [], [], [], [], [], [], [], [], [], []
     #countfilecount, gffcount = 0, 0
     base_count,countfilecount,genename,sposition,eposition,direction,gffcount = load_file(work_path)
-
     if gffcount == 0 :
         print('please check the files you have download')
         sys.exit(0)
     print(len(genename[0]))
+    f = open ('genename.txt','w')
+    for item in genename[0]:
+        f.write(item+'\n')
+    f.close()
     positiondict = dict_of_gene(genename[0], sposition[0], eposition[0])
+    dict_gene = sort_gene(positiondict)
+    # positiondict = dict_of_gene(dict_gene,)
     print(len(positiondict))
     if func_choose is '1':
+        samtools_command(work_path)
         if countfilecount == 0:
             print('ERROR: u need to run kallsito function first')
             sys.exit(0)
@@ -521,11 +647,17 @@ if __name__ == "__main__":
     # print(matrix)
     if func_choose is '2':
         matrix = kallisto_command()
-        cor_choose = int(input('1 for cij; 2 for pearson; 3 for spearman\n'))
+        cor_choose = input('1 for cij; 2 for pearson; 3 for spearman\n')
         print('---calculating...')
         result_mat = mat_choose(cor_choose, matrix)
         result_of_partition = partition_with_direction(direction[0])
+        # print(direction[0])
+        # print(len(genename[0]))
         # print(result_of_partition)
+        # print(result_of_partition)
+        # f=open('dirct.txt','w')
+        # f.write(str(direction[0]))
+        # f.close()
         np.savetxt('result_mat.txt', result_mat, fmt="%.4f", delimiter="\t")
         positive_data, data_p_len = text_read('positiveData.txt')
         # print(positive_data)
@@ -535,20 +667,25 @@ if __name__ == "__main__":
         threashold_min = float(threashold_.split(' ')[0])
         threashold_max = float(threashold_.split(' ')[1])
         threashold = threashold_max
+        minus_per_round = input('please key in the difference between ech round:(exp.: 0.05 or 0.1)\n')
+        minus_per_round = float(minus_per_round)
         rate_pr_list = []
         rate_roc_list = []
         num = 0
         while threashold >= threashold_min :
+            print('threshold:'+str(threashold))
             result_of_cluster = cluster(result_mat, result_of_partition, genename[0], threashold)
             f = open('result_pre'+ str(num) + '.txt','w')
             for i in result_of_cluster:
                 f.write(i+'\n')
             f.close()
             c_len = len(result_of_cluster)
+            print('clength:'+str(c_len))
             tpr, precision, fpr = rate_calculation(data_p_len, c_len, data_n_len, result_of_cluster, positive_data, negative_data)
             rate_pr_list.append([tpr, precision])
             rate_roc_list.append([fpr, tpr])
-            threashold -= 0.05
+            threashold -= minus_per_round
+            threashold = round(threashold, 2)
             num += 1
             # print(rate_list)
         pr_function(rate_pr_list)

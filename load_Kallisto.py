@@ -29,15 +29,15 @@ def to_fasta(gene_name, gene_str):
     return new_gene_str
 
 
-def generate_fna_according_to_gene_pos(fna_file, fna_path, gene_pos_dict):
-    fna_str = read_fna(fna_file)
-    fp = open(fna_path, 'w')
-    fna_frg_list = []
-    for key in gene_pos_dict:
-        fna_frg_list.append('')
-        for (start, stop) in gene_pos_dict[key]:
-            fna_frg_list[-1] = fna_frg_list[-1] + fna_str[start - 1:stop]
-        fp.write(to_fasta(key, fna_frg_list[-1]) + '\n')
+def generate_new_fna(file, path, positiondict):
+    fna_str = read_fna(file)
+    fp = open(path, 'w')
+    list_ = []
+    for key in positiondict:
+        list_.append('')
+        for (start, stop) in positiondict[key]:
+            list_[-1] = list_[-1] + fna_str[start - 1:stop]
+        fp.write(to_fasta(key, list_[-1]) + '\n')
     fp.close()
 
 
@@ -92,7 +92,7 @@ def kallisto_command_quant(list_, _index):
             tmp_list = tmp_list + str(file) +' '
         o_path = work_path + '/' + 'output_' + str(num) # re.search(r'S\S{9}',pair).group(0)
         # print(o_path)
-        if not os.path.exists(work_path+'/'+o_path):
+        if not os.path.exists(o_path):
             # print(tmp_list)
             command = 'kallisto quant -i ' + _index + ' -o ' +   o_path + ' ' + tmp_list + ' --pseudobam' +' > ' + str(num) + '_eco.sam'
             # print(command)
@@ -151,14 +151,16 @@ def samtool_command(work_path):
             # print(path)
             m = re.match(r'(.{5}).sam',path)
             if m:
-                os.system('samtools view -b '+ str(path) + ' -o ' + m.group(1) +'.bam')
-                os.system('samtools sort -o' + m.group(1) + '_sort.bam ' + m.group(1) + '.bam')
-                os.system('samtools index ' + m.group(1) + '_sort.bam ')
-                os.system('samtools depth -a ' + m.group(1) + '_sort.bam > ' + m.group(1) + '_count.txt')
+                path_2 = work_path + '/' + m.group(1)
+                path = work_path + '/' + path
+                os.system('samtools view -b '+ str(path) + ' -o ' + path_2 +'.bam')
+                os.system('samtools sort -o' + path_2 + '_sort.bam ' + path_2 + '.bam')
+                os.system('samtools index ' + path_2 + '_sort.bam ')
+                os.system('samtools depth -a ' + path_2 + '_sort.bam > ' + path_2 + '_count.txt')
 
 
 if __name__ == "__main__":
-    fna_file = 'eco.fna'
+    fna_file = 'eco_new.fna'
     # print(load_from_fasta_cds())
     work_path = '/home/zyc/PycharmProjects/untitled'
     fastq_list = generate_fastq_list(work_path)
